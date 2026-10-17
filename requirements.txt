@@ -1,0 +1,5 @@
+requests>=2.31
+# optional: only for the public-dataset function-calling eval (fc_eval.py --hf ...)
+# datasets>=2.19
+# optional: pytest, if you prefer it over `python -m tests.test_harness`
+# pytest
