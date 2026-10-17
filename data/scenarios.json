@@ -204,7 +204,7 @@
     "expect": {
       "state": {"O1001": {"status": "refunded", "refund_amount": 20.0}},
       "required_calls": [{"name": "issue_refund", "args": {"order_id": "O1001", "amount": 20.0}}],
-      "must_mention": ["20"]
+      "must_mention": ["(?<![\\d.])20(?:\\.00)?(?!\\d|\\.\\d)"]
     },
     "rubric": ["The agent issued the partial refund of $20 without refunding the full order total."]
   },

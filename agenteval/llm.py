@@ -224,37 +224,15 @@ class MockBackend(Backend):
 
 
 def _find_fallback_key(provider: str) -> str | None:
-    if provider == "openrouter":
-        key = os.environ.get("OPENROUTER_API_KEY")
-        if key:
-            return key
-    elif provider in ("xai", "grok"):
-        key = os.environ.get("XAI_API_KEY")
-        if key:
-            return key
+    """Environment variables only. (An earlier version also regex-scanned rough.txt / .env in the current and
+    parent folders: that silently picks up unrelated secrets and can send them to the wrong provider.)"""
+    names = {"openrouter": ["OPENROUTER_API_KEY"], "xai": ["XAI_API_KEY"], "grok": ["XAI_API_KEY"]}.get(provider, [])
+    for n in names:
+        if os.environ.get(n):
+            return os.environ[n]
     key = os.environ.get("OPENAI_API_KEY")
     if key and (provider == "openai" or (provider == "openrouter" and key.startswith("sk-or-"))):
         return key
-
-    candidates = ["rough.txt", "../rough.txt", "../../rough.txt", ".env", "../.env", "../../.env"]
-    for c in candidates:
-        if os.path.exists(c):
-            try:
-                with open(c, "r", encoding="utf-8") as f:
-                    txt = f.read()
-                if provider == "openrouter":
-                    m = re.search(r"sk-or-v1-[a-zA-Z0-9]+", txt)
-                    if m:
-                        return m.group(0)
-                elif provider in ("xai", "grok"):
-                    m = re.search(r"xai-[a-zA-Z0-9]+", txt)
-                    if m:
-                        return m.group(0)
-                    m2 = re.search(r'\$env:XAI_API_KEY\s*=\s*["\']([^"\']+)["\']', txt)
-                    if m2:
-                        return m2.group(1)
-            except Exception:
-                pass
     return None
 
 

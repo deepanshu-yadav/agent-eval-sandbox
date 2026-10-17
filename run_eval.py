@@ -46,6 +46,11 @@ def main():
     ap.add_argument("--live", action="store_true", default=True, help="stream live logs for turns and tool calls (default: True)")
     ap.add_argument("--no-live", dest="live", action="store_false", help="disable live logs, only print trial completions")
     a = ap.parse_args()
+    for stream in (sys.stdout, sys.stderr):  # Windows redirects/pipes default to cp1252; model output may not be ASCII
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
 
     agent = parse_spec(a.agent, api_key=a.api_key)
     user = parse_spec(a.user) if a.user else None

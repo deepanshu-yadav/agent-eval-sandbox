@@ -1,3 +1,7 @@
 results/*
 tests/__pycache__/*
 agenteval/__pycache__/*
+.env
+.env.*
+rough.txt
+*.key

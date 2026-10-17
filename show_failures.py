@@ -8,6 +8,7 @@ import argparse
 import glob
 import json
 import os
+import sys
 
 from agenteval.agent import render_transcript
 
@@ -18,6 +19,11 @@ def main():
     ap.add_argument("--task", help="substring of scenario id")
     ap.add_argument("--limit", type=int, default=3)
     a = ap.parse_args()
+    for stream in (sys.stdout, sys.stderr):  # Windows redirects/pipes default to cp1252; model output may not be ASCII
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     run = a.run or max(glob.glob("results/*/"), key=os.path.getmtime)
     shown = 0
     for line in open(os.path.join(run, "trials.jsonl"), encoding="utf-8"):

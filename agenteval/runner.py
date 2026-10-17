@@ -13,7 +13,7 @@ from .metrics import aggregate
 
 
 def load_scenarios(path, ids=None, categories=None):
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         sc = json.load(f)
     if ids:
         sc = [s for s in sc if any(i in s["id"] for i in ids)]
@@ -79,30 +79,40 @@ def run_suite(scenarios, agent, trials=3, user_backend=None, judge_backend=None,
             trials_file.flush()
         return res
 
+    # NOTE: do not use `with ThreadPoolExecutor(...)` here: its __exit__ runs shutdown(wait=True) which
+    # keeps executing every queued episode after Ctrl+C. cancel_futures=True drops the queue and only
+    # waits for episodes that are already in flight (at most `workers` of them).
+    pool = ThreadPoolExecutor(max_workers=workers)
+    futs = {pool.submit(work, s, t): (s["id"], t) for s, t in jobs}
+    interrupted = False
     try:
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            futs = {pool.submit(work, s, t): (s["id"], t) for s, t in jobs}
-            for fut in as_completed(futs):
-                r = fut.result()
-                results.append(r)
-                done_counter += 1
-                if progress:
-                    mark = "PASS" if r["grade"]["success"] else "FAIL " + ",".join(r["grade"]["failed"])
-                    with print_lock:
-                        print(f"[{done_counter}/{len(jobs)}] {r['scenario_id']} trial {r['trial']}: {mark} ({r['episode']['latency_s']:.2f}s)", flush=True)
+        for fut in as_completed(futs):
+            r = fut.result()
+            results.append(r)
+            done_counter += 1
+            if progress:
+                mark = "PASS" if r["grade"]["success"] else "FAIL " + ",".join(r["grade"]["failed"])
+                with print_lock:
+                    print(f"[{done_counter}/{len(jobs)}] {r['scenario_id']} trial {r['trial']}: {mark} ({r['episode']['latency_s']:.2f}s)", flush=True)
     except KeyboardInterrupt:
+        interrupted = True
         with print_lock:
-            print(f"\n[INTERRUPT] Evaluation interrupted by user. Summarizing {len(results)} finished trial(s)...", flush=True)
+            print("\n[INTERRUPT] Ctrl+C: dropping queued episodes, finishing in-flight ones "
+                  "(press Ctrl+C again to force quit)...", flush=True)
     finally:
+        pool.shutdown(wait=True, cancel_futures=True)
         trials_file.close()
+    if interrupted:  # include episodes that completed while shutting down
+        results = [f.result() for f in futs if f.done() and not f.cancelled() and f.exception() is None]
+        print(f"[INTERRUPT] summarizing {len(results)}/{len(jobs)} finished episode(s)", flush=True)
 
     results.sort(key=lambda r: (r["scenario_id"], r["trial"]))
     if results:
         summary = summarize(results, scenarios, trials, agent.name)
         summary["run_id"] = run_id
-        with open(os.path.join(outdir, "summary.json"), "w") as f:
+        with open(os.path.join(outdir, "summary.json"), "w", encoding="utf-8") as f:
             json.dump(summary, f, indent=2)
-        with open(os.path.join(outdir, "report.md"), "w") as f:
+        with open(os.path.join(outdir, "report.md"), "w", encoding="utf-8") as f:
             f.write(render_report(summary))
         return summary, outdir
     return {}, outdir
@@ -121,7 +131,7 @@ def summarize(results, scenarios, trials, agent_name):
     per_t = {k: tuple(v) for k, v in per.items()}
     overall = aggregate(per_t, ks)
     by_cat = {}
-    for cat in sorted(set(cat_of.values())):
+    for cat in sorted({cat_of[k] for k in per_t}):  # only categories that have results (partial runs)
         by_cat[cat] = aggregate({k: v for k, v in per_t.items() if cat_of[k] == cat}, [1, trials] if trials > 1 else [1])
     n = len(results)
     jscores = [r["judge"]["score"] for r in results if r.get("judge") and r["judge"].get("score") is not None]
@@ -150,6 +160,8 @@ def render_report(s):
     L += ["", "A big gap between pass@1 and pass^k means the agent *can* do the task but is not *reliable*.", "",
           "## By category", "", "| category | pass^1 | pass^k (k=n) |", "|---|---|---|"]
     for cat, d in s["by_category"].items():
+        if not d:
+            continue
         last = d[max(d)]
         L.append(f"| {cat} | {d[1]['pass^k']:.2f} | {last['pass^k']:.2f} |")
     L += ["", "## Per task", "", "| task | category | successes | failing checks |", "|---|---|---|---|"]
